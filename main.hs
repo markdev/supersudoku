@@ -24,92 +24,66 @@ testPuzzle = [
 processPuzzleInitial :: [[Int]] -> [[SudokuValue]]
 processPuzzleInitial values =
   let
-    processRow row = map (\d -> if (d == 0) then Pos [1..9] else Val d) row
+    createSudokuValue val =
+      if (val == 0)
+        then Pos [1..9]
+        else Val val
+    processRow row = map createSudokuValue row
   in map processRow values
 
 processRow :: [SudokuValue] -> [SudokuValue]
 processRow row =
   let
-    complete = filter (> 0) $ map (\sv -> case sv of
-      Val x -> x
-      Pos _ -> 0) row
-  in
-    map (\v -> case v of
+    getCompleteValue (Val x) = x
+    getCompleteValue _ = 0
+    completeValues = filter (> 0) $ map getCompleteValue row
+    prunePossible completeValues val = case val of
       Val x -> Val x
-      Pos xs -> Pos (xs \\ complete)) row
+      Pos xs -> Pos (xs \\ completeValues)
+  in
+    map (prunePossible completeValues) row
 
 regionize :: [[SudokuValue]] -> [[SudokuValue]]
 regionize sudoku =
   let
     cs = concatMap (chunksOf 3) sudoku
-  in [
-      concat $ cs!!0 : cs!!3 : cs!!6 : []
-    , concat $ cs!!1 : cs!!4 : cs!!7 : []
-    , concat $ cs!!2 : cs!!5 : cs!!8 : []
+    construct (a,b,c) = concat $ cs!!a : cs!!b : cs!!c : []
+  in map construct [(0,3,6), (1,4,7), (2,5,8), (9,12,15), (10,13,16), (11,14,17), (18,21,24), (19,22,25), (20,23,26)]
 
-    , concat $ cs!!9 : cs!!12 : cs!!15 : []
-    , concat $ cs!!10 : cs!!13 : cs!!16 : []
-    , concat $ cs!!11 : cs!!14 : cs!!17 : []
-
-    , concat $ cs!!18 : cs!!21 : cs!!24 : []
-    , concat $ cs!!19 : cs!!22 : cs!!25 : []
-    , concat $ cs!!20 : cs!!23 : cs!!26 : []
-    ]
-
-
-getRegionIndex :: Int -> Int
-getRegionIndex n = (3 * (n `div` 9)) + n `mod` 3
-
-iterateThroughSudoku :: [[SudokuValue]] -> [[SudokuValue]]
-iterateThroughSudoku sudoku =
+solve :: [[SudokuValue]] -> String
+solve sudoku =
   let
     horizontal = map processRow
     vertical = transpose . map processRow . transpose
     regional = regionize . map processRow . regionize
     processed = regional $ vertical $ horizontal sudoku
-  in
-    map (\row -> map (\i -> case i of
+    detectCertain val = case val of
       Val x -> Val x
       Pos (x:[]) -> Val x
       Pos x -> Pos x
-    ) row) processed
+    newSudoku = map (\row -> map detectCertain row) processed
+  in
+    if isSolved newSudoku
+      then display newSudoku
+      else solve newSudoku
+
+isSudokuVal :: SudokuValue -> Bool
+isSudokuVal (Val _) = True
+isSudokuVal _ = False
 
 isSolved :: [[SudokuValue]] -> Bool
 isSolved sudoku =
-  all (== True) $ map (\i -> case i of
-      Val _ -> True
-      Pos _ -> False
-    ) $ concat sudoku
+  all isSudokuVal $ concat sudoku
 
 display :: [[SudokuValue]] -> String
 display sudoku =
-  intercalate "\n" $ map (\row -> concatMap (\i -> case i of
-    Val x -> show x
-    Pos _ -> "_"
-  ) row) sudoku
+  let
+    showVals val = case val of
+      Val x -> show x
+      Pos _ -> "_"
+  in intercalate "\n" $ map (\row -> concatMap showVals row) sudoku
 
 main :: IO ()
 main = do
   let sudoku = processPuzzleInitial testPuzzle
-  let it1 = iterateThroughSudoku sudoku
-  print it1
-  let it2 = iterateThroughSudoku it1
-  print it2
-  let it3 = iterateThroughSudoku it2
-  print it3
-  let it4 = iterateThroughSudoku it3
-  print it4
-  let it5 = iterateThroughSudoku it4
-  print it5
-  let it6 = iterateThroughSudoku it5
-  print it6
-  let it7 = iterateThroughSudoku it6
-  print it7
-  let it8 = iterateThroughSudoku it7
-  print it8
-  let it9 = iterateThroughSudoku it8
-  print it9
-  let it10 = iterateThroughSudoku it9
-  print it10
-  putStrLn $ display it10
-  --print $ iterateThroughSudoku sudoku
+  putStrLn $ solve sudoku
