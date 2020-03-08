@@ -12,6 +12,7 @@ data BoardDelta = SudokuBoard Board Delta
 data Dimension = RowA | ColA | RegionA
 data BoardPossibility = Dead | Active Board | Solved Board
 data SolutionClass = NoSolution | Solution Board | MultipleSolutions [Board] deriving (Show, Eq)
+data Difficulty = Easy | Medium | Hard | Expert
 type Row = [SudokuValue]
 type Column = [SudokuValue]
 type Region = [SudokuValue]
@@ -64,9 +65,48 @@ solveWithDepth delta depth board =
       else if delta > 0 then (solveWithDepth newDelta depth newBoard)
         else (pickSolutionsWithDepth solveSplitBoards)
 
+solveWithDepthWrapper :: Board  -> (SolutionClass, Depth)
 solveWithDepthWrapper board = solveWithDepth 1 0 board
--- solveWithDepth :: Board -> (SolutionClass, Depth)
--- solveWithDepth board = (solveWithDepth' 1 board, 0)
+
+
+
+----------------------- Begin Dead Code
+
+-- solveWithDepthIO :: Delta -> Depth -> Board -> IO (SolutionClass, Depth)
+-- solveWithDepthIO delta depth board = do
+--   let (newBoard, newDelta) = nextIterationWDelta board
+--   let boards = (splitSmallest board (allPossiblities board))
+--   let solveSplitBoards = map (solveWithDepthIO 1 (depth+1)) boards
+--   if isSolved board
+--     then do
+--       putStrLn "It is solved!"
+--       print board
+--       putStrLn $ "Depth: " ++ (show depth)
+--       return (Solution board, depth)
+--     else do
+--       if not (isValidBoard board)
+--         then do
+--           return (NoSolution, depth)
+--         else do
+--           if (delta > 0)
+--             then do
+--               putStrLn "Going to the next iteration"
+--               print newBoard
+--               putStrLn $ "Depth: " ++ (show depth)
+--               return (solveWithDepthIO newDelta depth newBoard)
+--             else do
+--               putStrLn "Time to split the boards"
+--               print boards
+--               return (pickSolutionsWithDepth solveSplitBoards)
+--
+-- solveWithDepthIOWrapper :: Board -> IO (SolutionClass, Depth)
+-- solveWithDepthIOWrapper board = do
+--   solveWithDepthIO 1 0 board
+
+  -------------------- End Dead Code
+
+
+
 
 splitFirst :: Board -> [PossibilityTuple] -> [Board]
 splitFirst board (x:xs) = createNewBoards board x
@@ -79,13 +119,20 @@ splitSmallest board possibilities@(x:xs) =
   in createNewBoards board pos
 splitSmallest board _ = [board]
 
+pruneHorizontal :: Board -> Board
+pruneHorizontal board = map processRow board
+
+pruneVertical :: Board -> Board
+pruneVertical board = (transpose . map processRow . transpose) board
+
+pruneRegional :: Board -> Board
+pruneRegional board = (regionize . map processRow . regionize) board
+
 cleanPossibilities :: Board -> Board
 cleanPossibilities board =
-  let
-    horizontal = map processRow
-    vertical = transpose . map processRow . transpose
-    regional = regionize . map processRow . regionize
-  in regional $ vertical $ horizontal board
+  pruneRegional $
+  pruneVertical $
+  pruneHorizontal board
 
 process :: [[Int]] -> Board
 process values =
@@ -131,10 +178,10 @@ nextIteration :: Board -> Board
 nextIteration board =
   map (\row -> map detectCertain row) $ cleanPossibilities board
 
--- regionize :: Board -> Board
-regionize sudoku =
+regionize :: Board -> Board
+regionize board =
   let
-    cs = concatMap (chunksOf 3) sudoku
+    cs = concatMap (chunksOf 3) board
     construct (a,b,c) = concat $ cs!!a : cs!!b : cs!!c : []
   in map construct [(0,3,6), (1,4,7), (2,5,8), (9,12,15), (10,13,16), (11,14,17), (18,21,24), (19,22,25), (20,23,26)]
 
@@ -315,19 +362,6 @@ rotateRows :: [[Int]] -> Int -> Int -> [[Int]]
 rotateRows rawBoard a b =
   map (createRotation a b) rawBoard
 
-
--- createBoard :: IO ()
--- createBoard = do
---   let startBoard = completeBoard1
-
--- g <- getStdGen
--- n <- 6
--- print . take 10 $ (randomRs (1, 9) g)
--- print . take 10 $ (randomRs (1, 9) g)
--- number <- randomR (1, n) g
--- print number
-
-
 testRand :: Int -> IO [Int]
 testRand n = sequence $ take n $ repeat $ randomRIO (1,9::Int)
 
@@ -363,6 +397,34 @@ maskBoardOnce ri ci board =
 maskBoard :: [[Int]] -> [[Int]] -> [[Int]]
 maskBoard board masks =
   foldl (\acc (a:b:_) -> maskBoardOnce a b acc) board masks
+
+
+generateSudoku :: [[Int]] -> Difficulty -> Depth -> [[Int]] -> [[Int]]
+generateSudoku board difficulty depth masks =
+  let
+    difficultyThreshold = case difficulty of
+      Easy -> 0
+      Medium -> 1
+      Hard -> 3
+      Expert -> 6
+    boardNew = maskBoard board [head masks]
+    (sc, d) = solveWithDepthWrapper $ process boardNew
+  in
+    if (d > difficultyThreshold)
+      then board
+      else generateSudoku boardNew difficulty depth (tail masks)
+
+
+generateSudokuWrapper :: Difficulty -> [[Int]]
+generateSudokuWrapper difficulty =
+  let
+    board = completeBoard1
+    rs = getNums 20
+    boardNew = newBoard board rs
+    masks = getNums 70
+  in
+    generateSudoku board difficulty 0 masks
+
 
 main :: IO ()
 main = do
