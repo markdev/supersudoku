@@ -371,7 +371,7 @@ main = do
   let g = mkStdGen 1
   print g
   let rs = getNums 20
-  let masks = getNums 50
+  let masks = getNums 72
   print rs
   putStrLn "COMPLETED:"
   putStrLn "\n"
@@ -383,8 +383,26 @@ main = do
   let boardNew = newBoard board rs
   putStrLn $ show boardNew
   putStrLn " NOW WE WILL MASK THE BOARD "
-  let maskedBoard = maskBoard board masks
-  putStrLn $ show maskedBoard
-  putStrLn " NOW IT BECOMES THE BOARD "
-  let maskedBoard = maskBoard board masks
-  print $ process maskedBoard
+  if masks /= []
+    then do
+      addMaskAndDisplay (length masks) boardNew masks
+    else do
+      putStrLn "nope"
+  -- let maskedBoard = maskBoard board masks
+  -- putStrLn $ show maskedBoard
+  -- putStrLn " NOW IT BECOMES THE BOARD "
+  -- let maskedBoard = maskBoard board masks
+  -- print $ process maskedBoard
+addMaskAndDisplay :: Int -> [[Int]] -> [[Int]] -> IO ()
+addMaskAndDisplay originalMasks board masks = do
+  if masks /= []
+    then do
+      let boardNew = maskBoard board [head masks]
+      putStrLn "Here we goooooo"
+      putStrLn $ show $ originalMasks - (length masks)
+      putStrLn $ show boardNew
+      let pb = process boardNew
+      putStrLn $ show $ solveWithDepthWrapper pb
+      addMaskAndDisplay originalMasks boardNew (tail masks)
+    else do
+      putStrLn "nope"
