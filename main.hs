@@ -4,8 +4,14 @@ import Data.List.Split
 import Data.Maybe (catMaybes)
 import Boards
 import Control.Lens((.~), element)
+import System.Random
+import Data.Time.Clock.POSIX (getPOSIXTime)
 
 data SudokuValue = Val Int | Pos [Int] deriving (Show, Eq, Ord)
+data BoardDelta = SudokuBoard Board Delta
+data Dimension = RowA | ColA | RegionA
+data BoardPossibility = Dead | Active Board | Solved Board
+data SolutionClass = NoSolution | Solution Board | MultipleSolutions [Board] deriving (Show, Eq)
 type Row = [SudokuValue]
 type Column = [SudokuValue]
 type Region = [SudokuValue]
@@ -15,32 +21,81 @@ type ColIndex = Int
 type PossibleValues = [Int]
 type PossibilityTuple = (RowIndex, ColIndex, PossibleValues)
 type Delta = Int
-data BoardDelta = SudokuBoard Board Delta
-data Dimension = RowA | ColA | RegionA
-data BoardPossibility = Dead | Active Board | Solved Board
-data SolutionClass = NoSolution | Solution Board | MultipleSolutions [Board] deriving (Show, Eq)
---data Range = NoRange | Range (Int Int [Int])
+type Depth = Int
 
 tp2 :: Board
 tp2 = nextIteration $ process testPuzzle2
 
-
-solve2 :: Delta -> Board -> SolutionClass
-solve2 delta board =
+solve' :: Delta -> Board -> SolutionClass
+solve' delta board =
   let
     (newBoard, newDelta) = nextIterationWDelta board
   in if isSolved board then Solution board
     else if not (isValidBoard board) then NoSolution
-      else if delta > 0 then solve2 newDelta newBoard
-        else pickSolutions $ map (solve2 1) (splitFirst board (allPossiblities board))
--- extract pickSolutions, addConcatMap!!!!
+      else if delta > 0 then solve' newDelta newBoard
+        else pickSolutions $ map (solve' 1) (splitSmallest board (allPossiblities board))
 
-leSolve :: Board -> SolutionClass
-leSolve board = solve2 1 board
+solve :: Board -> SolutionClass
+solve board = solve' 1 board
 
---splitFirst tp2 $ allPossiblities tp2
+pickSolutionsWithDepth :: [(SolutionClass, Depth)] -> (SolutionClass, Depth)
+pickSolutionsWithDepth sclist
+  | length uniqueSolutions == 0 = (NoSolution, 0)
+  | length uniqueSolutions == 1 = head allSingleSolutions2
+  | length uniqueSolutions > 1 = (MultipleSolutions (map extractSolution uniqueSolutions), 0)
+  where
+    uniqueSolutions = nub allSingleSolutions
+    allSingleSolutions = map (\(sc, _) -> sc) $ filter isSolution sclist
+    allSingleSolutions2 = filter isSolution sclist
+    extractSolution (Solution x) = x
+    isSolution (sol, _) = case sol of
+        NoSolution -> False
+        Solution _ -> True
+        MultipleSolutions _ -> False
 
+solveWithDepth :: Delta -> Depth -> Board -> (SolutionClass, Depth)
+solveWithDepth delta depth board =
+  let
+    (newBoard, newDelta) = nextIterationWDelta board
+    boards = (splitSmallest board (allPossiblities board))
+    solveSplitBoards = map (solveWithDepth 1 (depth+1)) boards
+  in if isSolved board then (Solution board, depth)
+    else if not (isValidBoard board) then (NoSolution, depth)
+      else if delta > 0 then (solveWithDepth newDelta depth newBoard)
+        else (pickSolutionsWithDepth solveSplitBoards)
 
+solveWithDepthWrapper board = solveWithDepth 1 0 board
+-- solveWithDepth :: Board -> (SolutionClass, Depth)
+-- solveWithDepth board = (solveWithDepth' 1 board, 0)
+
+splitFirst :: Board -> [PossibilityTuple] -> [Board]
+splitFirst board (x:xs) = createNewBoards board x
+splitFirst board _ = [board]
+
+splitSmallest :: Board -> [PossibilityTuple] -> [Board]
+splitSmallest board possibilities@(x:xs) =
+  let
+    pos = head $ sortBy (compare `on` (length . (\(_,_,c) -> c))) $ possibilities
+  in createNewBoards board pos
+splitSmallest board _ = [board]
+
+cleanPossibilities :: Board -> Board
+cleanPossibilities board =
+  let
+    horizontal = map processRow
+    vertical = transpose . map processRow . transpose
+    regional = regionize . map processRow . regionize
+  in regional $ vertical $ horizontal board
+
+process :: [[Int]] -> Board
+process values =
+  let
+    createSudokuValue val =
+      if (val == 0)
+        then Pos [1..9]
+        else Val val
+    processRow row = map createSudokuValue row
+  in cleanPossibilities $ map processRow values
 
 pickSolutions :: [SolutionClass] -> SolutionClass
 pickSolutions sclist
@@ -57,71 +112,26 @@ pickSolutions sclist
         Solution _ -> True
         MultipleSolutions _ -> False
 
+detectCertain :: SudokuValue -> SudokuValue
+detectCertain val = case val of
+  Val x -> Val x
+  Pos (x:[]) -> Val x
+  Pos x -> Pos x
+
 nextIterationWDelta :: Board -> (Board, Delta)
-nextIterationWDelta sudoku =
+nextIterationWDelta board =
   let
-    horizontal = map processRow
-    vertical = transpose . map processRow . transpose
-    regional = regionize . map processRow . regionize
-    processed = regional $ vertical $ horizontal sudoku
-    detectCertain val = case val of
-      Val x -> Val x
-      Pos (x:[]) -> Val x
-      Pos x -> Pos x
-    newBoard = map (\row -> map detectCertain row) processed
-    oldSolvedCells = numberOfSolvedCells sudoku
+    newBoard = map (\row -> map detectCertain row) $ cleanPossibilities board
+    oldSolvedCells = numberOfSolvedCells board
     newSolvedCells = numberOfSolvedCells newBoard
     delta = newSolvedCells - oldSolvedCells
   in (newBoard, delta)
 
-{-
-  Step 1: Establish polymorphic data value
--}
-
-{-
-  TODO
-  - knight's quest http://learnyouahaskell.com/a-fistful-of-monads
-  - createHypotheticalBoard -> board -> row -> col -> val -> board
-  - getSmallestRange -> board -> (row, col, [val])
-  - showNextIteration Board -> IO String (shows original board and next board)
-  - transformBoard -> Board -> Dimension -> Value -> Value -> Board
--}
-
--- getSmallestRange :: Board -> Range
--- getSmallestRange board =
--- getAllPossiblities :: Board -> [(Int, Int, [Int])]
--- getAllPossiblities board =
---   let
---     getPos = case sudVal of
---       Val _ -> []
---       Pos x -> x
---     filter (/= []) $ map getPos $ concat board
---   in expression
-
-process :: [[Int]] -> Board
-process values =
-  let
-    createSudokuValue val =
-      if (val == 0)
-        then Pos [1..9]
-        else Val val
-    processRow row = map createSudokuValue row
-  in map processRow values
-
 nextIteration :: Board -> Board
-nextIteration sudoku =
-  let
-    horizontal = map processRow
-    vertical = transpose . map processRow . transpose
-    regional = regionize . map processRow . regionize
-    processed = regional $ vertical $ horizontal sudoku
-    detectCertain val = case val of
-      Val x -> Val x
-      Pos (x:[]) -> Val x
-      Pos x -> Pos x
-  in map (\row -> map detectCertain row) processed
+nextIteration board =
+  map (\row -> map detectCertain row) $ cleanPossibilities board
 
-regionize :: Board -> Board
+-- regionize :: Board -> Board
 regionize sudoku =
   let
     cs = concatMap (chunksOf 3) sudoku
@@ -139,33 +149,6 @@ processRow row =
       Pos xs -> Pos (xs \\ completeValues)
   in
     map (prunePossible completeValues) row
-
--- getNewValue :: Int -> Int -> Board -> SudokuValue
--- getNewValue rowIndex colIndex board =
---   let
---     possibilities = getPossibilities rowIndex colIndex board
---   in case board !! rowIndex !! colIndex of
---     Val x -> Val x
---     Pos _ -> case possibilities of
---       (x:[]) -> Val x
---       _ -> Pos possibilities
---
--- getNewRow :: Int -> Board -> Row
--- getNewRow rowIndex board =
---   let
---     row = board !! rowIndex
---     getNewRow' 9 newRow = newRow
---     getNewRow' n newRow =
---       getNewRow' (n+1) (newRow ++ [getNewValue rowIndex n board])
---   in getNewRow' 0 []
---
--- getNewBoard :: Board -> Board
--- getNewBoard board =
---   let
---     getNewBoard' 9 newBoard = newBoard
---     getNewBoard' n newBoard =
---       getNewBoard' (n+1) (newBoard ++ [getNewRow n board])
---   in getNewBoard' 0 []
 
 getPossibilities :: RowIndex -> ColIndex -> Board -> Maybe PossibilityTuple
 getPossibilities rowIndex colIndex board =
@@ -187,10 +170,6 @@ allPossiblities :: Board -> [PossibilityTuple]
 allPossiblities board =
   let coords = [ (r,c) | r <- [0..8], c <- [0..8]]
   in catMaybes $ map (\(r,c) -> getPossibilities r c board) coords
-
-splitFirst :: Board -> [PossibilityTuple] -> [Board]
-splitFirst board (x:xs) = createNewBoards board x
-splitFirst board _ = [board]
 
 createNewBoards :: Board -> PossibilityTuple -> [Board]
 createNewBoards board (r,c,ps) =
@@ -289,6 +268,13 @@ display sudoku =
       $ map showVals row)
       sudoku
 
+displaySolution :: SolutionClass -> String
+displaySolution solutionClass =
+  case solutionClass of
+    NoSolution -> "There are no solutions \n"
+    Solution x -> "There is one solution \n\n" ++ display x
+    MultipleSolutions xs -> "There are multiple solutions \n\n" ++ (intercalate "\n===========\n\n" $ map display xs)
+
 iterize :: Board -> Delta -> IO String
 iterize sudoku prevSolved = do
   if (isSolved sudoku)
@@ -314,19 +300,91 @@ showAllPossiblities board =
     intersperse "===========\n" $
     map display $ allNewBoards board
 
-solve :: Board -> String
-solve sudoku =
+
+createRotation ::  Int -> Int -> [Int] -> [Int]
+createRotation a b row =
   let
-    newSudoku = nextIteration sudoku
+    createRotation' a b [] ret = ret
+    createRotation' a b row@(x:xs) ret
+      | x == a = createRotation' a b (tail row) (ret ++ [b])
+      | x == b = createRotation' a b (tail row) (ret ++ [a])
+      | otherwise = createRotation' a b (tail row) (ret ++ [x])
+  in createRotation' a b row []
+
+rotateRows :: [[Int]] -> Int -> Int -> [[Int]]
+rotateRows rawBoard a b =
+  map (createRotation a b) rawBoard
+
+
+-- createBoard :: IO ()
+-- createBoard = do
+--   let startBoard = completeBoard1
+
+-- g <- getStdGen
+-- n <- 6
+-- print . take 10 $ (randomRs (1, 9) g)
+-- print . take 10 $ (randomRs (1, 9) g)
+-- number <- randomR (1, n) g
+-- print number
+
+
+testRand :: Int -> IO [Int]
+testRand n = sequence $ take n $ repeat $ randomRIO (1,9::Int)
+
+getNums :: Int -> [[Int]]
+getNums n =
+  let
+    g = mkStdGen 1
+  in take n $
+    nub $
+    filter (\(a:b:_) -> a /= b) $
+    chunksOf 2 $
+    ((randomRs (1, 9) g) :: [Int])
+
+newBoard :: [[Int]] -> [[Int]] -> [[Int]]
+newBoard board nums =
+  foldl (\acc (a:b:_) -> rotateRows acc a b) board nums
+
+maskBoardOnce :: RowIndex -> ColIndex -> [[Int]] -> [[Int]]
+maskBoardOnce ri ci board =
+  let
+    prevRows = take (ri - 1) board
+    lastRows = drop (ri) board
+    prevCols = take (ci - 1) $ board !! (ri - 1)
+    lastCols = drop (ci) $ board !! (ri - 1)
+    changedRow = prevCols ++ [0] ++ lastCols
+    newBoard = prevRows ++ [changedRow] ++ lastRows
   in
-    if isSolved newSudoku
-      then display newSudoku
-      else solve newSudoku
+    case solve (process newBoard) of
+      NoSolution -> board
+      Solution _ -> newBoard
+      MultipleSolutions _ -> board
+
+maskBoard :: [[Int]] -> [[Int]] -> [[Int]]
+maskBoard board masks =
+  foldl (\acc (a:b:_) -> maskBoardOnce a b acc) board masks
 
 main :: IO ()
 main = do
-  let sudoku = process testPuzzle2
-  completed <- iterize sudoku 0
+  let sudoku = process multiSolutions
+  let completed = solve sudoku
+  let g = mkStdGen 1
+  print g
+  let rs = getNums 20
+  let masks = getNums 50
+  print rs
   putStrLn "COMPLETED:"
   putStrLn "\n"
-  putStrLn completed
+  putStrLn $ displaySolution completed
+  putStrLn " HERE IS AN EXISTING BOARD "
+  let board = completeBoard1
+  putStrLn $ show board
+  putStrLn " NOW TO GENERATE A NEW BOARD "
+  let boardNew = newBoard board rs
+  putStrLn $ show boardNew
+  putStrLn " NOW WE WILL MASK THE BOARD "
+  let maskedBoard = maskBoard board masks
+  putStrLn $ show maskedBoard
+  putStrLn " NOW IT BECOMES THE BOARD "
+  let maskedBoard = maskBoard board masks
+  print $ process maskedBoard
