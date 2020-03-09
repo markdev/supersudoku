@@ -25,26 +25,120 @@ type PossibilityTuple = (RowIndex, ColIndex, PossibleValues)
 type Delta = Int
 type Depth = Int
 
+generateBoard :: Difficulty -> Board
+generateBoard difficulty =
+  let
+    board = completeBoard1
+    rs = getRandomValues 20
+    boardNew = rotate board rs
+    masks = getRandomValues 81
+    rootBoard = completeBoard1
+  in
+    toBoard $ applyMasks masks difficulty $ rotate' rs $ rootBoard
+
+generateBoards :: Difficulty -> Int -> [Board]
+generateBoards difficulty n =
+  replicate n (generateBoard difficulty)
+
+generateBoardFile :: Difficulty -> Int -> IO ()
+generateBoardFile difficulty n = do
+  putStrLn "Enter the file name:\n"
+  let boards = generateBoards difficulty n
+  let content = intercalate "\n\n" $ map toText boards
+  writeFile "sudokuSolutions.txt" content
+  putStrLn $ content
+
+toText :: Board -> String
+toText board =
+  let
+    showSv sv = case sv of
+      Val x -> show x
+      Pos _ -> "0"
+  in intercalate "\n" (map (\row -> concatMap (\sv -> showSv sv) row) board)
+
+solve :: Board -> SolutionClass
+solve board = solve1' 1 board
+
+solveMultiple :: [Board] -> [SolutionClass]
+solveMultiple boards = map solve boards
+
+solveFile :: IO ()
+solveFile = do
+  putStrLn "Enter the file name:\n"
+  fileName <- getLine
+  --let fileName = "sudoku01.txt"
+  handle <- openFile fileName ReadMode
+  contents <- hGetContents handle
+  let splitBoards = splitWhen (== "") $ lines contents
+  let sudokus = (map . map . map) (read . pure) splitBoards :: [[[Int]]]
+  let boards = map toBoard sudokus
+  let solutions = map solve boards
+  putStrLn $ unlines $ map display solutions
+  hClose handle
+
+display :: SolutionClass -> String
+display solutionClass =
+  case solutionClass of
+    NoSolution -> "There are no solutions \n"
+    Solution x -> "There is one solution \n\n" ++ displayOne x ++ "\n\n"
+    MultipleSolutions xs -> "There are multiple solutions \n\n" ++ (intercalate "\n===========\n\n" $ map displayOne xs)
+
+displayOne :: Board -> String
+displayOne sudoku =
+  let
+    showVals val = case val of
+      Val x -> show x
+      Pos _ -> "_"
+    addHorizontalLine = intercalate ["-----------"] . chunksOf 3
+    addVerticalLine = intercalate ["|"] . chunksOf 3
+  in intercalate "\n"
+    $ addHorizontalLine
+    $ map (\row -> concat
+      $ addVerticalLine
+      $ map showVals row)
+      sudoku
+
+
+
+
+
+createRotation ::  Int -> Int -> [Int] -> [Int]
+createRotation a b row =
+  let
+    createRotation' a b [] ret = ret
+    createRotation' a b row@(x:xs) ret
+      | x == a = createRotation' a b (tail row) (ret ++ [b])
+      | x == b = createRotation' a b (tail row) (ret ++ [a])
+      | otherwise = createRotation' a b (tail row) (ret ++ [x])
+  in createRotation' a b row []
+
+rotateRows :: [[Int]] -> Int -> Int -> [[Int]]
+rotateRows rawBoard a b =
+  map (createRotation a b) rawBoard
+
+
+
+
+
+
+
 tp2 :: Board
-tp2 = nextIteration $ process testPuzzle2
+tp2 = nextIteration $ toBoard testPuzzle2
 
 tp56 = createMaskedBoard completeBoard1 56
 tp57 = createMaskedBoard completeBoard1 57
 
-solve' :: Delta -> Board -> SolutionClass
-solve' delta board =
+solve1' :: Delta -> Board -> SolutionClass
+solve1' delta board =
   let
-    (newBoard, newDelta) = nextIterationWDelta board
+    (rotate, newDelta) = nextIterationWDelta board
   in if isSolved board then Solution board
     else if not (isValidBoard board) then NoSolution
-      else if delta > 0 then solve' newDelta newBoard
-        else pickSolutions $ map (solve' 1) (splitSmallest board (allPossiblities board))
+      else if delta > 0 then solve1' newDelta rotate
+        else pickSolutions $ map (solve1' 1) (splitSmallest board (allPossiblities board))
 
 
--- pickSolutions $ map (solve' 1) (splitSmallest board (allPossiblities board))
-
-solve :: Board -> SolutionClass
-solve board = solve' 1 board
+-- pickSolutions $ map (solve1' 1) (splitSmallest board (allPossiblities board))
 
 pickSolutionsWithDepth :: [(SolutionClass, Depth)] -> (SolutionClass, Depth)
 pickSolutionsWithDepth sclist
@@ -64,74 +158,16 @@ pickSolutionsWithDepth sclist
 solveWithDepth :: Delta -> Depth -> Board -> (SolutionClass, Depth)
 solveWithDepth delta depth board =
   let
-    (newBoard, newDelta) = nextIterationWDelta board
+    (rotate, newDelta) = nextIterationWDelta board
     boards = (splitSmallest board (allPossiblities board))
     solveSplitBoards = map (solveWithDepth 1 (depth+1)) boards
   in if isSolved board then (Solution board, depth)
     else if not (isValidBoard board) then (NoSolution, depth)
-      else if delta > 0 then (solveWithDepth newDelta depth newBoard)
+      else if delta > 0 then (solveWithDepth newDelta depth rotate)
         else (pickSolutionsWithDepth solveSplitBoards)
 
 solveWithDepthWrapper :: Board  -> (SolutionClass, Depth)
 solveWithDepthWrapper board = solveWithDepth 1 0 board
-
-
-
------------------------ Begin Dead Code
-{-
-solveWithDepthIO :: Delta -> Depth -> Board -> IO (SolutionClass, Depth)
-solveWithDepthIO delta depth board = do
-  let (newBoard, newDelta) = nextIterationWDelta board
-  let boards = (splitSmallest board (allPossiblities board))
-  let solveSplitBoards = map (solveWithDepthIO 1 (depth+1)) boards
-  if isSolved board
-    then do
-      putStrLn "It is solved!"
-      print board
-      putStrLn $ "Depth: " ++ (show depth)
-      return (Solution board, depth)
-    else do
-      if not (isValidBoard board)
-        then do
-          return (NoSolution, depth)
-        else do
-          if (delta > 0)
-            then do
-              putStrLn "Going to the next iteration"
-              print newBoard
-              putStrLn $ "Depth: " ++ (show depth)
-              return (solveWithDepthIO newDelta depth newBoard)
-            else do
-              putStrLn "Time to split the boards"
-              print boards
-              return (pickSolutionsWithDepthIO solveSplitBoards)
-
-pickSolutionsWithDepthIO :: [IO (SolutionClass, Depth)] -> IO (SolutionClass, Depth)
-pickSolutionsWithDepthIO sclist
-  | length uniqueSolutions == 0 = IO (NoSolution, 0)
-  | length uniqueSolutions == 1 = IO (head allSingleSolutions2)
-  | length uniqueSolutions > 1 = IO (MultipleSolutions (map extractSolution uniqueSolutions), 0)
-  where
-    uniqueSolutions = nub allSingleSolutions
-    allSingleSolutions = map (\ IO (sc, _) -> sc) $ filter isSolution sclist
-    --allSingleSolutions2 = filter isSolution sclist
-    isSolution (IO (sol, _)) = case sol of
-        NoSolution -> False
-        Solution _ -> True
-        MultipleSolutions _ -> False
-    extractSolution (Solution x) = x
-
-
-solveWithDepthIOWrapper :: Board -> IO (SolutionClass, Depth)
-solveWithDepthIOWrapper board = do
-  solveWithDepthIO 1 0 board
-
-  -}
-
-  -------------------- End Dead Code
-
-
-
 
 splitFirst :: Board -> [PossibilityTuple] -> [Board]
 splitFirst board (x:xs) = createNewBoards board x
@@ -159,8 +195,8 @@ cleanPossibilities board =
   pruneVertical $
   pruneHorizontal board
 
-process :: [[Int]] -> Board
-process values =
+toBoard :: [[Int]] -> Board
+toBoard values =
   let
     createSudokuValue val =
       if (val == 0)
@@ -193,11 +229,11 @@ detectCertain val = case val of
 nextIterationWDelta :: Board -> (Board, Delta)
 nextIterationWDelta board =
   let
-    newBoard = map (\row -> map detectCertain row) $ cleanPossibilities board
+    rotate = map (\row -> map detectCertain row) $ cleanPossibilities board
     oldSolvedCells = numberOfSolvedCells board
-    newSolvedCells = numberOfSolvedCells newBoard
+    newSolvedCells = numberOfSolvedCells rotate
     delta = newSolvedCells - oldSolvedCells
-  in (newBoard, delta)
+  in (rotate, delta)
 
 nextIteration :: Board -> Board
 nextIteration board =
@@ -326,33 +362,11 @@ isSolved :: Board -> Bool
 isSolved sudoku =
   all isSudokuVal $ concat sudoku
 
-display :: Board -> String
-display sudoku =
-  let
-    showVals val = case val of
-      Val x -> show x
-      Pos _ -> "_"
-    addHorizontalLine = intercalate ["-----------"] . chunksOf 3
-    addVerticalLine = intercalate ["|"] . chunksOf 3
-  in unlines $ lines $ intercalate "\n"
-    $ addHorizontalLine
-    $ map (\row -> concat
-      $ addVerticalLine
-      $ map showVals row)
-      sudoku
-
-displaySolution :: SolutionClass -> String
-displaySolution solutionClass =
-  case solutionClass of
-    NoSolution -> "There are no solutions \n"
-    Solution x -> "There is one solution \n\n" ++ display x
-    MultipleSolutions xs -> "There are multiple solutions \n\n" ++ (intercalate "\n===========\n\n" $ map display xs)
-
 iterize :: Board -> Delta -> IO String
 iterize sudoku prevSolved = do
   if (isSolved sudoku)
     then
-      return $ display sudoku
+      return $ displayOne sudoku
     else do
       let nextSudoku = nextIteration sudoku
       let newSolved = numberOfSolvedCells nextSudoku
@@ -362,7 +376,7 @@ iterize sudoku prevSolved = do
           return "FAILURE"
         else do
           putStrLn "\n"
-          putStrLn $ display sudoku
+          putStrLn $ displayOne sudoku
           putStrLn $ show newSolved
           putStrLn "\n"
           iterize nextSudoku newSolved
@@ -371,28 +385,13 @@ showAllPossiblities :: Board -> IO ()
 showAllPossiblities board =
   mapM_ putStr $
     intersperse "===========\n" $
-    map display $ allNewBoards board
-
-
-createRotation ::  Int -> Int -> [Int] -> [Int]
-createRotation a b row =
-  let
-    createRotation' a b [] ret = ret
-    createRotation' a b row@(x:xs) ret
-      | x == a = createRotation' a b (tail row) (ret ++ [b])
-      | x == b = createRotation' a b (tail row) (ret ++ [a])
-      | otherwise = createRotation' a b (tail row) (ret ++ [x])
-  in createRotation' a b row []
-
-rotateRows :: [[Int]] -> Int -> Int -> [[Int]]
-rotateRows rawBoard a b =
-  map (createRotation a b) rawBoard
+    map displayOne $ allNewBoards board
 
 testRand :: Int -> IO [Int]
 testRand n = sequence $ take n $ repeat $ randomRIO (1,9::Int)
 
-getNums :: Int -> [[Int]]
-getNums n =
+getRandomValues :: Int -> [[Int]]
+getRandomValues n =
   let
     g = mkStdGen 1
   in take n $
@@ -401,61 +400,22 @@ getNums n =
     chunksOf 2 $
     ((randomRs (1, 9) g) :: [Int])
 
-newBoard :: [[Int]] -> [[Int]] -> [[Int]]
-newBoard board nums =
-  foldl (\acc (a:b:_) -> rotateRows acc a b) board nums
-
-maskBoardOnce :: RowIndex -> ColIndex -> [[Int]] -> [[Int]]
-maskBoardOnce ri ci board =
-  let
-    prevRows = take (ri - 1) board
-    lastRows = drop (ri) board
-    prevCols = take (ci - 1) $ board !! (ri - 1)
-    lastCols = drop (ci) $ board !! (ri - 1)
-    changedRow = prevCols ++ [0] ++ lastCols
-    newBoard = prevRows ++ [changedRow] ++ lastRows
-  in
-    case solve (process newBoard) of
-      NoSolution -> board
-      Solution _ -> newBoard
-      MultipleSolutions _ -> board
-
-maskBoard :: [[Int]] -> [[Int]] -> [[Int]]
-maskBoard board masks =
-  foldl (\acc (a:b:_) -> maskBoardOnce a b acc) board masks
-
 createMaskedBoard :: [[Int]] -> Int -> Board
 createMaskedBoard board numberOfMasks =
   let
-    masks = getNums numberOfMasks
-  in process $ maskBoard board masks
-
-
-generateSudoku :: [[Int]] -> Difficulty -> Depth -> [[Int]] -> [[Int]]
-generateSudoku board difficulty depth masks =
-  let
-    difficultyThreshold = case difficulty of
-      Easy -> 0
-      Medium -> 1
-      Hard -> 3
-      Expert -> 6
-    boardNew = maskBoard board [head masks]
-    (sc, d) = solveWithDepthWrapper $ process boardNew
-  in
-    if (d > difficultyThreshold)
-      then board
-      else generateSudoku boardNew difficulty depth (tail masks)
+    masks = getRandomValues numberOfMasks
+  in toBoard $ mask board masks
 
 
 generateSudokuWrapper :: Difficulty -> [[Int]]
 generateSudokuWrapper difficulty =
   let
     board = completeBoard1
-    rs = getNums 20
-    boardNew = newBoard board rs
-    masks = getNums 70
+    rs = getRandomValues 20
+    boardNew = rotate board rs
+    masks = getRandomValues 70
   in
-    generateSudoku board difficulty 0 masks
+    applyMasks masks difficulty board
 
 
 parseText :: IO ()
@@ -470,7 +430,7 @@ parseText = do
   print splitBoards
   let charz = map (\board -> map (\row -> map (\char -> read [char] :: Int) row) board) splitBoards
   print charz
-  let processedBoardz = map process charz
+  let processedBoardz = map toBoard charz
   print processedBoardz
   hClose handle
 
@@ -485,24 +445,66 @@ parseTextExample = do
   print sudokus
   hClose handle
 
+applyMasks :: [[Int]] -> Difficulty -> [[Int]] -> [[Int]]
+applyMasks masks difficulty board =
+  let
+    difficultyThreshold = case difficulty of
+      Easy -> 0
+      Medium -> 1
+      Hard -> 3
+      Expert -> 6
+    boardNew = mask board [head masks]
+    (sc, d) = solveWithDepthWrapper $ toBoard boardNew
+  in
+    if (d > difficultyThreshold)
+      then board
+      else applyMasks (tail masks) difficulty boardNew
+
+mask :: [[Int]] -> [[Int]] -> [[Int]]
+mask board masks = foldl (\acc (a:b:_) -> maskBoardOnce a b acc) board masks
+
+maskBoardOnce :: RowIndex -> ColIndex -> [[Int]] -> [[Int]]
+maskBoardOnce ri ci board =
+  let
+    prevRows = take (ri - 1) board
+    lastRows = drop (ri) board
+    prevCols = take (ci - 1) $ board !! (ri - 1)
+    lastCols = drop (ci) $ board !! (ri - 1)
+    changedRow = prevCols ++ [0] ++ lastCols
+    newBoard = prevRows ++ [changedRow] ++ lastRows
+  in
+    case solve (toBoard newBoard) of
+      NoSolution -> board
+      Solution _ -> newBoard
+      MultipleSolutions _ -> board
+
+rotate' :: [[Int]] -> [[Int]] -> [[Int]]
+rotate' coords board =
+  foldl (\acc (a:b:_) -> rotateRows acc a b) board coords
+
+rotate :: [[Int]] -> [[Int]] -> [[Int]]
+rotate board coords =
+  foldl (\acc (a:b:_) -> rotateRows acc a b) board coords
+
+
 
 main :: IO ()
 main = do
-  let sudoku = process multiSolutions
+  let sudoku = toBoard multiSolutions
   let completed = solve sudoku
   let g = mkStdGen 1
   print g
-  let rs = getNums 20
-  let masks = getNums 72
+  let rs = getRandomValues 20
+  let masks = getRandomValues 72
   print rs
   putStrLn "COMPLETED:"
   putStrLn "\n"
-  putStrLn $ displaySolution completed
+  putStrLn $ display completed
   putStrLn " HERE IS AN EXISTING BOARD "
   let board = completeBoard1
   putStrLn $ show board
   putStrLn " NOW TO GENERATE A NEW BOARD "
-  let boardNew = newBoard board rs
+  let boardNew = rotate board rs
   putStrLn $ show boardNew
   putStrLn " NOW WE WILL MASK THE BOARD "
   if masks /= []
@@ -510,20 +512,16 @@ main = do
       addMaskAndDisplay (length masks) boardNew masks
     else do
       putStrLn "nope"
-  -- let maskedBoard = maskBoard board masks
-  -- putStrLn $ show maskedBoard
-  -- putStrLn " NOW IT BECOMES THE BOARD "
-  -- let maskedBoard = maskBoard board masks
-  -- print $ process maskedBoard
+
 addMaskAndDisplay :: Int -> [[Int]] -> [[Int]] -> IO ()
 addMaskAndDisplay originalMasks board masks = do
   if masks /= []
     then do
-      let boardNew = maskBoard board [head masks]
+      let boardNew = mask board [head masks]
       putStrLn "Here we goooooo"
       putStrLn $ show $ originalMasks - (length masks)
       putStrLn $ show boardNew
-      let pb = process boardNew
+      let pb = toBoard boardNew
       putStrLn $ show $ solveWithDepthWrapper pb
       addMaskAndDisplay originalMasks boardNew (tail masks)
     else do
