@@ -5,6 +5,7 @@ import Data.Maybe (catMaybes)
 import Boards
 import Control.Lens((.~), element)
 import System.Random
+import System.IO
 import Data.Time.Clock.POSIX (getPOSIXTime)
 
 data SudokuValue = Val Int | Pos [Int] deriving (Show, Eq, Ord)
@@ -27,6 +28,9 @@ type Depth = Int
 tp2 :: Board
 tp2 = nextIteration $ process testPuzzle2
 
+tp56 = createMaskedBoard completeBoard1 56
+tp57 = createMaskedBoard completeBoard1 57
+
 solve' :: Delta -> Board -> SolutionClass
 solve' delta board =
   let
@@ -35,6 +39,9 @@ solve' delta board =
     else if not (isValidBoard board) then NoSolution
       else if delta > 0 then solve' newDelta newBoard
         else pickSolutions $ map (solve' 1) (splitSmallest board (allPossiblities board))
+
+
+-- pickSolutions $ map (solve' 1) (splitSmallest board (allPossiblities board))
 
 solve :: Board -> SolutionClass
 solve board = solve' 1 board
@@ -71,37 +78,55 @@ solveWithDepthWrapper board = solveWithDepth 1 0 board
 
 
 ----------------------- Begin Dead Code
+{-
+solveWithDepthIO :: Delta -> Depth -> Board -> IO (SolutionClass, Depth)
+solveWithDepthIO delta depth board = do
+  let (newBoard, newDelta) = nextIterationWDelta board
+  let boards = (splitSmallest board (allPossiblities board))
+  let solveSplitBoards = map (solveWithDepthIO 1 (depth+1)) boards
+  if isSolved board
+    then do
+      putStrLn "It is solved!"
+      print board
+      putStrLn $ "Depth: " ++ (show depth)
+      return (Solution board, depth)
+    else do
+      if not (isValidBoard board)
+        then do
+          return (NoSolution, depth)
+        else do
+          if (delta > 0)
+            then do
+              putStrLn "Going to the next iteration"
+              print newBoard
+              putStrLn $ "Depth: " ++ (show depth)
+              return (solveWithDepthIO newDelta depth newBoard)
+            else do
+              putStrLn "Time to split the boards"
+              print boards
+              return (pickSolutionsWithDepthIO solveSplitBoards)
 
--- solveWithDepthIO :: Delta -> Depth -> Board -> IO (SolutionClass, Depth)
--- solveWithDepthIO delta depth board = do
---   let (newBoard, newDelta) = nextIterationWDelta board
---   let boards = (splitSmallest board (allPossiblities board))
---   let solveSplitBoards = map (solveWithDepthIO 1 (depth+1)) boards
---   if isSolved board
---     then do
---       putStrLn "It is solved!"
---       print board
---       putStrLn $ "Depth: " ++ (show depth)
---       return (Solution board, depth)
---     else do
---       if not (isValidBoard board)
---         then do
---           return (NoSolution, depth)
---         else do
---           if (delta > 0)
---             then do
---               putStrLn "Going to the next iteration"
---               print newBoard
---               putStrLn $ "Depth: " ++ (show depth)
---               return (solveWithDepthIO newDelta depth newBoard)
---             else do
---               putStrLn "Time to split the boards"
---               print boards
---               return (pickSolutionsWithDepth solveSplitBoards)
---
--- solveWithDepthIOWrapper :: Board -> IO (SolutionClass, Depth)
--- solveWithDepthIOWrapper board = do
---   solveWithDepthIO 1 0 board
+pickSolutionsWithDepthIO :: [IO (SolutionClass, Depth)] -> IO (SolutionClass, Depth)
+pickSolutionsWithDepthIO sclist
+  | length uniqueSolutions == 0 = IO (NoSolution, 0)
+  | length uniqueSolutions == 1 = IO (head allSingleSolutions2)
+  | length uniqueSolutions > 1 = IO (MultipleSolutions (map extractSolution uniqueSolutions), 0)
+  where
+    uniqueSolutions = nub allSingleSolutions
+    allSingleSolutions = map (\ IO (sc, _) -> sc) $ filter isSolution sclist
+    --allSingleSolutions2 = filter isSolution sclist
+    isSolution (IO (sol, _)) = case sol of
+        NoSolution -> False
+        Solution _ -> True
+        MultipleSolutions _ -> False
+    extractSolution (Solution x) = x
+
+
+solveWithDepthIOWrapper :: Board -> IO (SolutionClass, Depth)
+solveWithDepthIOWrapper board = do
+  solveWithDepthIO 1 0 board
+
+  -}
 
   -------------------- End Dead Code
 
@@ -292,6 +317,7 @@ numberOfSolvedCells board =
     _ -> 0
     ) $ concat board
 
+
 isSudokuVal :: SudokuValue -> Bool
 isSudokuVal (Val _) = True
 isSudokuVal _ = False
@@ -398,6 +424,12 @@ maskBoard :: [[Int]] -> [[Int]] -> [[Int]]
 maskBoard board masks =
   foldl (\acc (a:b:_) -> maskBoardOnce a b acc) board masks
 
+createMaskedBoard :: [[Int]] -> Int -> Board
+createMaskedBoard board numberOfMasks =
+  let
+    masks = getNums numberOfMasks
+  in process $ maskBoard board masks
+
 
 generateSudoku :: [[Int]] -> Difficulty -> Depth -> [[Int]] -> [[Int]]
 generateSudoku board difficulty depth masks =
@@ -424,6 +456,34 @@ generateSudokuWrapper difficulty =
     masks = getNums 70
   in
     generateSudoku board difficulty 0 masks
+
+
+parseText :: IO ()
+parseText = do
+  putStrLn "Enter filename"
+  let file = "sudoku01"
+  putStrLn $ "You entered: " ++ file
+  handle <- openFile (file ++ ".txt") ReadMode
+  contents <- hGetContents handle
+  putStrLn contents
+  let splitBoards = splitWhen (=="") $ lines contents
+  print splitBoards
+  let charz = map (\board -> map (\row -> map (\char -> read [char] :: Int) row) board) splitBoards
+  print charz
+  let processedBoardz = map process charz
+  print processedBoardz
+  hClose handle
+
+parseTextExample :: IO ()
+parseTextExample = do
+  handle <- openFile "sudoku01.txt" ReadMode
+  contents <- hGetContents handle
+  let splitBoards = splitWhen (== "") $ lines contents
+  print splitBoards
+  --let sudokus = map (\board -> map (\row -> map (\char -> read [char] :: Int) row) board) splitBoards
+  let sudokus = (map . map . map) (read . pure) splitBoards :: [[[Int]]]
+  print sudokus
+  hClose handle
 
 
 main :: IO ()
