@@ -20,27 +20,24 @@ genBoards difficulty n = do
 
 solveOneBoard :: IO ()
 solveOneBoard = do
-  putStrLn "Enter row 1:"
-  r1 <- processLine <$> getLine
-  putStrLn "Enter row 2:"
-  r2 <- processLine <$> getLine
-  putStrLn "Enter row 3:"
-  r3 <- processLine <$> getLine
-  putStrLn "Enter row 4:"
-  r4 <- processLine <$> getLine
-  putStrLn "Enter row 5:"
-  r5 <- processLine <$> getLine
-  putStrLn "Enter row 6:"
-  r6 <- processLine <$> getLine
-  putStrLn "Enter row 7:"
-  r7 <- processLine <$> getLine
-  putStrLn "Enter row 8:"
-  r8 <- processLine <$> getLine
-  putStrLn "Enter row 9:"
-  r9 <- processLine <$> getLine
-  let board = toBoard [r1,r2,r3,r4,r5,r6,r7,r8,r9]
-  let solved = solve board
+  board <- solveOneBoard' []
+  let solved = solve $ toBoard board
   putStrLn $ display solved
+
+solveOneBoard' :: [[Int]] -> IO ([[Int]])
+solveOneBoard' strings = do
+  if length strings >= 9
+    then do
+      return strings
+    else do
+      putStrLn $ "Enter row #" ++ (show (length strings))
+      r <- map (\c -> read [c] :: Int) <$> getLine
+      if (length r == 9)
+        then do
+          solveOneBoard' (strings ++ [r])
+        else do
+          putStrLn "That is not a valid board"
+          solveOneBoard' strings
 
 solveMultipleBoards :: IO ()
 solveMultipleBoards = do
