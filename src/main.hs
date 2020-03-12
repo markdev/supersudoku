@@ -18,6 +18,15 @@ genBoards difficulty n = do
   putStrLn $ intercalate "\n\n============\n\n"
     $ map displayOne boards
 
+generateBoardFile :: Difficulty -> Int -> IO ()
+generateBoardFile difficulty n = do
+  putStrLn "Enter the file name:\n"
+  let gs = [mkStdGen 1]
+  let boards = generateBoards difficulty gs
+  let content = intercalate "\n\n" $ map toText boards
+  writeFile "sudokuSolutions.txt" content
+  putStrLn $ content
+
 solveOneBoard :: IO ()
 solveOneBoard = do
   board <- solveOneBoard' []
@@ -42,7 +51,8 @@ solveOneBoard' strings = do
 solveMultipleBoards :: IO ()
 solveMultipleBoards = do
   putStrLn "Enter the file name:\n"
-  fileName <- getLine
+  --fileName <- getLine
+  let fileName = "../sudoku01.txt"
   handle <- openFile fileName ReadMode
   contents <- hGetContents handle
   let splitBoards = splitWhen (== "") $ lines contents

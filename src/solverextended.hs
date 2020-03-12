@@ -2,10 +2,10 @@ module Solver (
     generateBoard
   , displayOne
   , generateBoards
+  , processLine
   , toBoard
   , solve
   , display
-  , toText
   , Difficulty
 ) where
 
@@ -34,6 +34,10 @@ type PossibilityTuple = (RowIndex, ColIndex, PossibleValues)
 type Delta = Int
 type Depth = Int
 
+processLine :: String -> [Int]
+processLine str =
+  map (\c -> read [c] :: Int) str
+
 generateBoard :: Difficulty -> StdGen -> Board
 generateBoard difficulty g =
   let
@@ -43,11 +47,20 @@ generateBoard difficulty g =
     boardNew = rotate board rs
     rootBoard = completeBoard1
   in
-    toBoard $ applyMasks masks difficulty $ rotate rootBoard rs
+    toBoard $ applyMasks masks difficulty $ rotate' rs $ rootBoard
 
 generateBoards :: Difficulty -> [StdGen] -> [Board]
 generateBoards difficulty gs =
   map (generateBoard difficulty) gs
+
+generateBoardFile :: Difficulty -> Int -> IO ()
+generateBoardFile difficulty n = do
+  putStrLn "Enter the file name:\n"
+  let gs = [mkStdGen 1]
+  let boards = generateBoards difficulty gs
+  let content = intercalate "\n\n" $ map toText boards
+  writeFile "sudokuSolutions.txt" content
+  putStrLn $ content
 
 toText :: Board -> String
 toText board =
@@ -99,6 +112,12 @@ rotateRows :: [[Int]] -> Int -> Int -> [[Int]]
 rotateRows rawBoard a b =
   map (createRotation a b) rawBoard
 
+tp2 :: Board
+tp2 = nextIteration $ toBoard testPuzzle2
+
+tp56 = createMaskedBoard completeBoard1 56
+tp57 = createMaskedBoard completeBoard1 57
+
 solve' :: Delta -> Board -> SolutionClass
 solve' delta board =
   let
@@ -137,6 +156,10 @@ solveWithDepth delta depth board =
 solveWithDepthWrapper :: Board  -> (SolutionClass, Depth)
 solveWithDepthWrapper board = solveWithDepth 1 0 board
 
+splitFirst :: Board -> [PossibilityTuple] -> [Board]
+splitFirst board (x:xs) = createNewBoards board x
+splitFirst board _ = [board]
+
 splitSmallest :: Board -> [PossibilityTuple] -> [Board]
 splitSmallest board possibilities@(x:xs) =
   let
@@ -144,14 +167,20 @@ splitSmallest board possibilities@(x:xs) =
   in createNewBoards board pos
 splitSmallest board _ = [board]
 
+pruneHorizontal :: Board -> Board
+pruneHorizontal board = map processRow board
+
+pruneVertical :: Board -> Board
+pruneVertical board = (transpose . map processRow . transpose) board
+
+pruneRegional :: Board -> Board
+pruneRegional board = (regionize . map processRow . regionize) board
+
 cleanPossibilities :: Board -> Board
 cleanPossibilities board =
-  let
-    pruneHorizontal board = map processRow board
-    pruneVertical board = (transpose . map processRow . transpose) board
-    pruneRegional board = (regionize . map processRow . regionize) board
-  in
-    pruneRegional $ pruneVertical $ pruneHorizontal board
+  pruneRegional $
+  pruneVertical $
+  pruneHorizontal board
 
 toBoard :: [[Int]] -> Board
 toBoard values =
@@ -249,23 +278,58 @@ createNewBoards board (r,c,ps) =
   in
     map createNewBoard ps
 
+allNewBoards board = concatMap (createNewBoards board) (allPossiblities board)
+
 getValue :: SudokuValue -> Int
 getValue sudVal = case sudVal of
   Val x -> x
   _ -> 0
 
-isValidRow :: Row -> Bool
-isValidRow row =
+isValidRow :: Int -> Board -> Bool
+isValidRow rowIndex board =
+  let
+    row = board !! rowIndex
+    values = filter (> 0) $ map getValue row
+  in values == nub values
+
+isValidRow' :: Row -> Bool
+isValidRow' row =
   let
     values = filter (> 0) $ map getValue row
+  in values == nub values
+
+isValidCol :: Int -> Board -> Bool
+isValidCol colIndex board =
+  let
+    col = (transpose board) !! colIndex
+    values = filter (> 0) $ map getValue col
+  in values == nub values
+
+isValidCol' :: Column -> Bool
+isValidCol' column =
+  let
+    values = filter (> 0) $ map getValue column
+  in values == nub values
+
+isValidReg :: Int -> Int -> Board -> Bool
+isValidReg rowIndex colIndex board =
+  let
+    reg = concat ((chunksOf 3 (transpose $ (chunksOf 3 board) !! (rowIndex `div` 3))) !! (colIndex `div` 3))
+    values = filter (> 0) $ map getValue reg
+  in values == nub values
+
+isValidReg' :: Region -> Bool
+isValidReg' region =
+  let
+    values = filter (> 0) $ map getValue region
   in values == nub values
 
 isValidBoard :: Board -> Bool
 isValidBoard board =
   let
-    rowValidity = map isValidRow board
-    colValidity = map isValidRow (transpose board)
-    regionValidity = map isValidRow (regionize board)
+    rowValidity = map isValidRow' board
+    colValidity = map isValidCol' (transpose board)
+    regionValidity = map isValidReg' (regionize board)
   in
     all (== True) $ (rowValidity ++ colValidity ++ regionValidity)
 
@@ -276,6 +340,7 @@ numberOfSolvedCells board =
     _ -> 0
     ) $ concat board
 
+
 isSudokuVal :: SudokuValue -> Bool
 isSudokuVal (Val _) = True
 isSudokuVal _ = False
@@ -284,7 +349,24 @@ isSolved :: Board -> Bool
 isSolved sudoku =
   all isSudokuVal $ concat sudoku
 
-allNewBoards board = concatMap (createNewBoards board) (allPossiblities board)
+iterize :: Board -> Delta -> IO String
+iterize sudoku prevSolved = do
+  if (isSolved sudoku)
+    then
+      return $ displayOne sudoku
+    else do
+      let nextSudoku = nextIteration sudoku
+      let newSolved = numberOfSolvedCells nextSudoku
+      if prevSolved == newSolved
+        then do
+          putStrLn "This puzzle is not solvable without branching"
+          return "FAILURE"
+        else do
+          putStrLn "\n"
+          putStrLn $ displayOne sudoku
+          putStrLn $ show newSolved
+          putStrLn "\n"
+          iterize nextSudoku newSolved
 
 showAllPossiblities :: Board -> IO ()
 showAllPossiblities board =
@@ -309,6 +391,7 @@ createMaskedBoard board numberOfMasks =
     g = mkStdGen 1
     masks = getRandomValues numberOfMasks g
   in toBoard $ mask board masks
+
 
 generateSudokuWrapper :: Difficulty -> StdGen -> [[Int]]
 generateSudokuWrapper difficulty g =
@@ -352,6 +435,10 @@ maskBoardOnce ri ci board =
       NoSolution -> board
       Solution _ -> newBoard
       MultipleSolutions _ -> board
+
+rotate' :: [[Int]] -> [[Int]] -> [[Int]]
+rotate' coords board =
+  foldl (\acc (a:b:_) -> rotateRows acc a b) board coords
 
 rotate :: [[Int]] -> [[Int]] -> [[Int]]
 rotate board coords =
